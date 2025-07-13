@@ -71,6 +71,7 @@ export default function Quiz() {
     try {
       await saveQuizResultFn(quizData, answers, score);
       toast.success("Quiz completed!");
+      window.location.reload();
     } catch (error) {
       toast.error(error.message || "Failed to save quiz results");
     }
