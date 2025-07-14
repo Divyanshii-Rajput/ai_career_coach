@@ -1,28 +1,3 @@
-// // import { clerkMiddleware } from '@clerk/nextjs/server';
-
-// // export default clerkMiddleware();
-
-// // export const config = {
-// //   matcher: [
-// //     // Skip Next.js internals and all static files, unless found in search params
-// //     '/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)',
-// //     // Always run for API routes
-// //     '/(api|trpc)(.*)',
-// //   ],
-// // };
-
-// import { clerkMiddleware } from '@clerk/nextjs/server';
- 
-// export default clerkMiddleware();
-
-// export const config = {
-//   matcher: [
-//     // ✅ EXCLUDE auth and static routes to prevent redirect loops
-//     '/((?!_next|sign-in|sign-up|sign-out|favicon.ico|.*\\..*).*)',
-//   ],
-// };
-
-
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
 
