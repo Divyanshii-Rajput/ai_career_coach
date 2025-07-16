@@ -2,7 +2,7 @@
 
 import { db } from "@/lib/prisma";
 import { auth } from "@clerk/nextjs/server";
-// import { revalidatePath } from "next/cache";
+import { revalidatePath } from "next/cache";
 import { generateAIInsights } from "./dashboard";
 import { success } from "zod";
 
@@ -60,7 +60,7 @@ export async function updateUser(data) {
       }
     );
 
-    // revalidatePath("/");
+    revalidatePath("/");
     return { success: true, ...result};
   } catch (error) {
     console.error("Error updating user and industry:", error.message);
