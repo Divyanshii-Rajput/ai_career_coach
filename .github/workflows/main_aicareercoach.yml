@@ -39,7 +39,9 @@ jobs:
       # Generate Prisma
       - name: Generate Prisma Client
         run: npx prisma generate
-
+        
+      - name: Push Prisma schema to DB
+        run: npx prisma db push
       # Build Next.js app
       - name: Build app
         run: npm run build
