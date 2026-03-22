@@ -23,28 +23,36 @@ jobs:
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
 
     steps:
+      # 1. Checkout code
       - uses: actions/checkout@v4
 
+      # 2. Setup Node
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
+      # 3. Install dependencies
       - name: Install dependencies
         run: npm install
 
+      # 4. Prisma generate
       - name: Generate Prisma Client
         run: npx prisma generate
 
-      #  IMPORTANT: Force DB sync (with debug)
+      # 5. Push DB schema (IMPORTANT)
       - name: Push Prisma schema to DB
-        run: |
-          echo "DATABASE_URL is set"
-          npx prisma db push
+        run: npx prisma db push
 
+      # 6. Build Next.js app
       - name: Build app
         run: npm run build
 
+      # 7. FIX: Include middleware in standalone build
+      - name: Copy middleware to standalone
+        run: cp middleware.ts .next/standalone/
+
+      # 8. Login to Azure
       - name: Azure Login
         uses: azure/login@v2
         with:
@@ -52,9 +60,10 @@ jobs:
           tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_D606307F25D44824B42CA9AF3094A920 }}
           subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_5F7A5EBFE9B34F009030A9699F8B06C8 }}
 
+      # 9. Deploy ONLY standalone build
       - name: Deploy to Azure Web App
         uses: azure/webapps-deploy@v3
         with:
           app-name: 'aicareercoach'
           slot-name: 'Production'
-          package: .
+          package: .next/standalone
