@@ -1,29 +1,30 @@
 "use server";
 
 import { db } from "@/lib/prisma";
-import { auth } from "@clerk/nextjs/server";
+import { currentUser } from "@clerk/nextjs/server";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
 export async function generateQuiz() {
-    const { userId } = await auth();
-    if (!userId) throw new Error("Unauthorized");
+  const clerkUser = await currentUser();
+  if (!clerkUser) throw new Error("Unauthorized");
 
-    const user = await db.user.findUnique({
-        where: { clerkUserId: userId },
-        select: {
-            industry: true,
-            skills: true,
-        },
-    });
+  const user = await db.user.findUnique({
+    where: { clerkUserId: clerkUser.id },
+    select: {
+      industry: true,
+      skills: true,
+    },
+  });
 
-    if (!user) throw new Error("User not found");
+  if (!user) throw new Error("User not found");
 
-    const prompt = `
-Generate exactly 10 multiple-choice technical interview questions for a professional in the ${user.industry} industry${user.skills?.length ? ` with expertise in ${user.skills.join(", ")}` : ""
-        }.
+  const prompt = `
+Generate exactly 10 multiple-choice technical interview questions for a professional in the ${user.industry} industry${
+    user.skills?.length ? ` with expertise in ${user.skills.join(", ")}` : ""
+  }.
 
 Each question must have:
 - A single clear question
@@ -45,130 +46,114 @@ Return ONLY valid JSON in this strict format. Do NOT add explanations, markdown,
 }
   `;
 
-    try {
-        const result = await model.generateContent(prompt);
-        const response = result.response;
-        const text = response.text();
+  try {
+    const result = await model.generateContent(prompt);
+    const text = result.response.text();
 
-        console.log("Gemini raw response:", text);
+    const cleanedText = text
+      .replace(/```json/g, "")
+      .replace(/```/g, "")
+      .trim();
 
-        // Clean up any ```json or ``` wrappers
-        const cleanedText = text
-            .replace(/```json/g, "")
-            .replace(/```/g, "")
-            .trim();
+    const quiz = JSON.parse(cleanedText);
 
-        console.log("Cleaned response:", cleanedText);
-
-        const quiz = JSON.parse(cleanedText);
-
-        // Validate format
-        if (!quiz.questions || !Array.isArray(quiz.questions)) {
-            console.error("Invalid quiz format:", quiz);
-            throw new Error("Gemini response did not contain valid quiz questions");
-        }
-
-        return quiz.questions;
-    } catch (error) {
-        console.error("Error generating quiz:", error.message || error);
-        throw new Error("Failed to generate quiz questions");
+    if (!quiz.questions || !Array.isArray(quiz.questions)) {
+      throw new Error("Invalid quiz format");
     }
+
+    return quiz.questions;
+  } catch (error) {
+    console.error("Error generating quiz:", error.message || error);
+    throw new Error("Failed to generate quiz questions");
+  }
 }
 
 export async function saveQuizResult(questions, answers, score) {
-    const { userId } = await auth();
-    if (!userId) throw new Error("Unauthorized");
+  const clerkUser = await currentUser();
+  if (!clerkUser) throw new Error("Unauthorized");
 
-    const user = await db.user.findUnique({
-        where: { clerkUserId: userId },
-    });
+  const user = await db.user.findUnique({
+    where: { clerkUserId: clerkUser.id },
+  });
 
-    if (!user) throw new Error("User not found");
+  if (!user) throw new Error("User not found");
 
-    const questionResults = questions.map((q, index) => ({
-        question: q.question,
-        answer: q.correctAnswer,
-        userAnswer: answers[index],
-        isCorrect: q.correctAnswer === answers[index],
-        explanation: q.explanation,
-    }));
+  const questionResults = questions.map((q, index) => ({
+    question: q.question,
+    answer: q.correctAnswer,
+    userAnswer: answers[index],
+    isCorrect: q.correctAnswer === answers[index],
+    explanation: q.explanation,
+  }));
 
-    // Get wrong answers
-    const wrongAnswers = questionResults.filter((q) => !q.isCorrect);
+  const wrongAnswers = questionResults.filter((q) => !q.isCorrect);
 
-    // Only generate improvement tips if there are wrong answers
-    let improvementTip = null;
-    if (wrongAnswers.length > 0) {
-        const wrongQuestionsText = wrongAnswers
-            .map(
-                (q) =>
-                    `Question: "${q.question}"\nCorrect Answer: "${q.answer}"\nUser Answer: "${q.userAnswer}"`
-            )
-            .join("\n\n");
+  let improvementTip = null;
 
-        const improvementPrompt = `
-      The user got the following ${user.industry} technical interview questions wrong:
+  if (wrongAnswers.length > 0) {
+    const wrongQuestionsText = wrongAnswers
+      .map(
+        (q) =>
+          `Question: "${q.question}"\nCorrect Answer: "${q.answer}"\nUser Answer: "${q.userAnswer}"`
+      )
+      .join("\n\n");
 
-      ${wrongQuestionsText}
+    const improvementPrompt = `
+The user got the following ${user.industry} technical interview questions wrong:
 
-      Based on these mistakes, provide a concise, specific improvement tip.
-      Focus on the knowledge gaps revealed by these wrong answers.
-      Keep the response under 2 sentences and make it encouraging.
-      Don't explicitly mention the mistakes, instead focus on what to learn/practice.
-    `;
+${wrongQuestionsText}
 
-        try {
-            const tipResult = await model.generateContent(improvementPrompt);
-
-            improvementTip = tipResult.response.text().trim();
-            console.log(improvementTip);
-        } catch (error) {
-            console.error("Error generating improvement tip:", error);
-            // Continue without improvement tip if generation fails
-        }
-    }
+Provide a concise improvement tip (max 2 sentences).
+Focus on what to learn next.
+`;
 
     try {
-        const assessment = await db.assessment.create({
-            data: {
-                userId: user.id,
-                quizScore: score,
-                questions: questionResults,
-                category: "Technical",
-                improvementTip,
-            },
-        });
-
-        return assessment;
+      const tipResult = await model.generateContent(improvementPrompt);
+      improvementTip = tipResult.response.text().trim();
     } catch (error) {
-        console.error("Error saving quiz result:", error);
-        throw new Error("Failed to save quiz result");
+      console.error("Error generating improvement tip:", error);
     }
+  }
+
+  try {
+    const assessment = await db.assessment.create({
+      data: {
+        userId: user.id,
+        quizScore: score,
+        questions: questionResults,
+        category: "Technical",
+        improvementTip,
+      },
+    });
+
+    return assessment;
+  } catch (error) {
+    console.error("Error saving quiz result:", error);
+    throw new Error("Failed to save quiz result");
+  }
 }
 
 export async function getAssessments() {
-    const { userId } = await auth();
-    if (!userId) throw new Error("Unauthorized");
+  const clerkUser = await currentUser();
+  if (!clerkUser) throw new Error("Unauthorized");
 
-    const user = await db.user.findUnique({
-        where: { clerkUserId: userId },
+  const user = await db.user.findUnique({
+    where: { clerkUserId: clerkUser.id },
+  });
+
+  if (!user) throw new Error("User not found");
+
+  try {
+    return await db.assessment.findMany({
+      where: {
+        userId: user.id,
+      },
+      orderBy: {
+        createdAt: "asc",
+      },
     });
-
-    if (!user) throw new Error("User not found");
-
-    try {
-        const assessments = await db.assessment.findMany({
-            where: {
-                userId: user.id,
-            },
-            orderBy: {
-                createdAt: "asc",
-            },
-        });
-
-        return assessments;
-    } catch (error) {
-        console.error("Error fetching assessments:", error);
-        throw new Error("Failed to fetch assessments");
-    }
+  } catch (error) {
+    console.error("Error fetching assessments:", error);
+    throw new Error("Failed to fetch assessments");
+  }
 }
